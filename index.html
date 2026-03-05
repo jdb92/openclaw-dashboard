@@ -1530,6 +1530,7 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
                 <span class="radial-gauge-text">TEMP</span>
               </div>
             </div>
+            <div id="tempSparkline" style="margin-top:8px;"></div>
           </div>
           <div class="system-metric">
             <div class="radial-gauge">
@@ -1543,7 +1544,7 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
                 <span class="radial-gauge-text" id="systemDiskDetail" style="font-size:9px;"></span>
               </div>
             </div>
-<!-- -->
+            <div id="diskSparkline" style="margin-top:8px;"></div>
           </div>
           <div class="system-metric">
             <div style="text-align: center; padding-top: 20px;">
@@ -4525,6 +4526,8 @@ function renderHealthSparklines() {
   
   renderSparkline('cpuSparkline', 'cpu', 'var(--green)');
   renderSparkline('ramSparkline', 'ram', 'var(--blue)');
+  renderSparkline('tempSparkline', 'temp', 'var(--yellow)');
+  renderSparkline('diskSparkline', 'disk', 'var(--purple)');
 }
 
 async function fetchNewData() {

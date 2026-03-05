@@ -1447,7 +1447,9 @@ function saveHealthSnapshot() {
     healthHistory.push({
       t: now,
       cpu: stats.cpu?.usage || 0,
-      ram: stats.memory?.percent || 0
+      ram: stats.memory?.percent || 0,
+      temp: stats.cpu?.temp || 0,
+      disk: stats.disk?.percent || 0
     });
     if (healthHistory.length > 288) {
       healthHistory = healthHistory.slice(-288);
