@@ -81,6 +81,15 @@ Visit `http://localhost:7000` in your browser. On first visit, you'll see a **re
 - **OpenClaw** installed and running
 - **Systemd** (optional, for service installation on Linux)
 
+#### Optional dependencies
+
+| Tool | Required for | Install |
+|------|-------------|---------|
+| `jq` | Docker management page | `sudo apt install jq` |
+| `tmux` | Claude CLI usage scraper | `sudo apt install tmux` |
+| `python3` | Claude CLI usage parser | Usually pre-installed |
+| `docker` | Docker management page | [docs.docker.com](https://docs.docker.com/engine/install/) |
+
 ### Manual Install
 
 1. **Clone the repository**
