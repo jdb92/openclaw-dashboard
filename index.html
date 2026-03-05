@@ -1357,6 +1357,10 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
         <span class="icon">🛡️</span>
         <span class="nav-text">Sys Security</span>
       </div>
+      <div class="nav-item" data-page="config-editor">
+        <span class="icon">⚙️</span>
+        <span class="nav-text">Config</span>
+      </div>
     </nav>
     <div style="padding:16px;border-top:1px solid var(--border);margin-top:auto;">
       <div id="mfaStatusIndicator" style="padding:4px 8px;margin-bottom:8px;font-size:10px;text-align:center;border-radius:6px;display:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
@@ -2088,6 +2092,26 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
       <div class="card" style="margin-top:16px;">
         <div class="card-title">🔍 OpenClaw Security Audit</div>
         <pre id="secAudit" style="font-size:12px;max-height:400px;overflow-y:auto;white-space:pre-wrap;">Loading...</pre>
+      </div>
+    </div>
+
+    <div class="page" id="config-editor">
+      <div class="page-header">
+        <h1 class="page-title">Config Editor</h1>
+        <p class="page-subtitle">Edit OpenClaw configuration</p>
+      </div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div class="card-title" style="margin:0;">📝 openclaw.json</div>
+          <div style="display:flex;gap:8px;">
+            <button onclick="loadConfig()" style="padding:8px 16px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);cursor:pointer;font-size:13px;">↻ Reload</button>
+            <button onclick="saveConfig()" id="configSaveBtn" style="padding:8px 16px;background:linear-gradient(135deg,var(--accent),var(--purple));color:#fff;border:none;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;">💾 Save & Restart</button>
+          </div>
+        </div>
+        <div id="configError" style="display:none;color:var(--red);font-size:12px;margin-bottom:12px;padding:10px;background:rgba(239,68,68,0.1);border-radius:6px;border:1px solid rgba(239,68,68,0.3);"></div>
+        <div id="configSuccess" style="display:none;color:var(--green);font-size:12px;margin-bottom:12px;padding:10px;background:rgba(16,185,129,0.1);border-radius:6px;border:1px solid rgba(16,185,129,0.3);"></div>
+        <textarea id="configTextarea" spellcheck="false" style="width:100%;min-height:500px;padding:16px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;color:var(--text-primary);font-family:'JetBrains Mono',monospace;font-size:13px;line-height:1.5;resize:vertical;tab-size:2;" placeholder="Loading..."></textarea>
+        <div style="margin-top:8px;font-size:11px;color:var(--text-muted);">⚠️ Saving will create a backup and restart the OpenClaw gateway. Be careful with changes.</div>
       </div>
     </div>
 
@@ -3093,7 +3117,7 @@ let notificationsEnabled = false;
 document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', () => {
     const page = item.dataset.page;
-    if ((page === 'sys-security' || page === 'security') && !sysSecAuthed) { showReauthModal(page); return; }
+    if ((page === 'sys-security' || page === 'security' || page === 'config-editor') && !sysSecAuthed) { showReauthModal(page); return; }
     document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
     item.classList.add('active');
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -5427,7 +5451,47 @@ async function submitReauth() {
     document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
     document.getElementById(reauthTargetPage).classList.add('active');
     if (reauthTargetPage === 'sys-security') fetchSysSecurity();
+    if (reauthTargetPage === 'config-editor') loadConfig();
   } catch(e) { errEl.textContent = 'Error: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function loadConfig() {
+  const ta = document.getElementById('configTextarea');
+  const errEl = document.getElementById('configError');
+  const sucEl = document.getElementById('configSuccess');
+  errEl.style.display = 'none';
+  sucEl.style.display = 'none';
+  ta.value = 'Loading...';
+  try {
+    const res = await authFetch(API_BASE + '/api/openclaw-config');
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+    ta.value = JSON.stringify(JSON.parse(data.config), null, 2);
+  } catch(e) { errEl.textContent = 'Failed to load: ' + e.message; errEl.style.display = 'block'; }
+}
+
+async function saveConfig() {
+  const ta = document.getElementById('configTextarea');
+  const errEl = document.getElementById('configError');
+  const sucEl = document.getElementById('configSuccess');
+  errEl.style.display = 'none';
+  sucEl.style.display = 'none';
+  try {
+    JSON.parse(ta.value);
+  } catch(e) { errEl.textContent = 'Invalid JSON: ' + e.message; errEl.style.display = 'block'; return; }
+  if (!confirm('Save config and restart OpenClaw gateway?')) return;
+  try {
+    const res = await authFetch(API_BASE + '/api/openclaw-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: ta.value })
+    });
+    const data = await res.json();
+    if (data.error) { errEl.textContent = data.error; errEl.style.display = 'block'; return; }
+    sucEl.textContent = '✅ Config saved. Backup: ' + data.backup + '. Gateway restarting...';
+    sucEl.style.display = 'block';
+    showToast('Config saved, gateway restarting...', 'success');
+  } catch(e) { errEl.textContent = 'Save failed: ' + e.message; errEl.style.display = 'block'; }
 }
 
 function cancelReauth() {
@@ -5437,10 +5501,8 @@ function cancelReauth() {
 
 document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', () => {
-    if (item.dataset.page === 'sys-security') {
-      if (!sysSecAuthed) { showReauthModal(); return; }
-      fetchSysSecurity();
-    }
+    if (item.dataset.page === 'sys-security' && sysSecAuthed) fetchSysSecurity();
+    if (item.dataset.page === 'config-editor' && sysSecAuthed) loadConfig();
   });
 });
 </script>

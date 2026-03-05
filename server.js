@@ -2000,6 +2000,42 @@ const server = http.createServer((req, res) => {
       });
       return;
     }
+    if (req.url === '/api/openclaw-config' && req.method === 'GET') {
+      if (!requireAuth(req, res)) return;
+      const configPath = process.env.OPENCLAW_CONFIG || path.join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
+      try {
+        const content = fs.readFileSync(configPath, 'utf8');
+        JSON.parse(content);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ config: content, path: configPath }));
+      } catch(e) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+      auditLog('config_read', ip, {});
+      return;
+    }
+    if (req.url === '/api/openclaw-config' && req.method === 'PUT') {
+      if (!requireAuth(req, res)) return;
+      let body = '';
+      req.on('data', c => { body += c; if (body.length > 1048576) req.destroy(); });
+      req.on('end', () => {
+        try {
+          const { config } = JSON.parse(body);
+          JSON.parse(config);
+          const configPath = process.env.OPENCLAW_CONFIG || path.join(process.env.HOME || '/root', '.openclaw', 'openclaw.json');
+          const backupPath = configPath + '.bak.' + Date.now();
+          fs.copyFileSync(configPath, backupPath);
+          fs.writeFileSync(configPath, config, 'utf8');
+          auditLog('config_saved', ip, { backup: backupPath });
+          const { execSync } = require('child_process');
+          try { execSync('openclaw gateway restart', { timeout: 15000 }); } catch(e) {}
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true, backup: backupPath }));
+        } catch(e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid JSON: ' + e.message }));
+        }
+      });
+      return;
+    }
     if (req.url === '/api/sys-security') {
       const { execSync } = require('child_process');
       const run = (cmd) => { try { return execSync(cmd, { timeout: 10000 }).toString().replace(/</g, '&lt;').replace(/>/g, '&gt;'); } catch(e) { return e.stdout ? e.stdout.toString().replace(/</g, '&lt;').replace(/>/g, '&gt;') : 'Error: ' + e.message; } };
