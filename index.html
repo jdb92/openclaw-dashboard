@@ -1385,6 +1385,10 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
         <span class="icon">🤖</span>
         <span class="nav-text">Sessions</span>
       </div>
+      <div class="nav-item" data-page="aios">
+        <span class="icon">⚡</span>
+        <span class="nav-text">AI-OS</span>
+      </div>
       <div class="nav-item" data-page="costs">
         <span class="icon">💰</span>
         <span class="nav-text">Costs</span>
@@ -1741,6 +1745,35 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
           <div class="sortable" data-sort="updated">Updated</div>
         </div>
         <div id="sessionsTableBody"></div>
+      </div>
+    </div>
+
+
+    <div class="page" id="aios">
+      <div class="page-header">
+        <h1 class="page-title">AI-OS</h1>
+        <p class="page-subtitle">Persoonlijk AI Operating System — briefings, runs en operationele voortgang</p>
+      </div>
+
+      <div class="grid grid-4 mb-24">
+        <div class="card"><div class="metric accent"><div class="metric-value" id="aiosTotalRuns">0</div><div class="metric-label">Tracked Runs</div></div></div>
+        <div class="card"><div class="metric green"><div class="metric-value" id="aiosRunningRuns">0</div><div class="metric-label">Running</div></div></div>
+        <div class="card"><div class="metric"><div class="metric-value" id="aiosSuccessToday">0</div><div class="metric-label">Success Today</div></div></div>
+        <div class="card"><div class="metric"><div class="metric-value" id="aiosFailuresToday">0</div><div class="metric-label">Failures Today</div></div></div>
+      </div>
+
+      <div class="grid grid-2 mb-24" style="align-items:start;">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;">
+            <h3 class="card-title" style="margin:0;">Today Briefing</h3>
+            <button onclick="fetchAiosData()" style="padding:4px 10px;background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;">↻ Refresh</button>
+          </div>
+          <div id="aiosTodayBriefing" style="max-height:560px;overflow-y:auto;"></div>
+        </div>
+        <div class="card">
+          <h3 class="card-title">Recent Runs</h3>
+          <div id="aiosRecentRuns" style="max-height:560px;overflow-y:auto;"></div>
+        </div>
       </div>
     </div>
 
@@ -2676,6 +2709,7 @@ function showApp() {
   fetchHealthHistory();
   fetchMemoryFiles();
   fetchKeyFiles();
+  fetchAiosData();
   checkMFAStatus();
   
   if (localStorage.getItem('usageAutoRefresh') === '1') {
@@ -2687,6 +2721,7 @@ function showApp() {
   setInterval(fetchHealthHistory, 60000);
   setInterval(fetchMemoryFiles, 30000);
   setInterval(fetchKeyFiles, 30000);
+  setInterval(fetchAiosData, 30000);
 }
 
 function showLogin() {
@@ -3217,6 +3252,7 @@ let sortBy = 'updated';
 let sortDir = 'desc';
 let selectedSessions = new Set();
 let notificationsEnabled = false;
+let aiosData = { briefings: [], runs: [], stats: {} };
 
 document.querySelectorAll('.nav-item').forEach(item => {
   item.addEventListener('click', () => {
@@ -3236,6 +3272,9 @@ document.querySelectorAll('.nav-item').forEach(item => {
     
     if (page === 'memory') {
       fetchMemoryFiles();
+    }
+    if (page === 'aios') {
+      fetchAiosData();
     }
     if (page === 'files') {
       fetchKeyFiles();
@@ -4533,6 +4572,88 @@ function renderHealthSparklines() {
   renderSparkline('ramSparkline', 'ram', 'var(--blue)');
   renderSparkline('tempSparkline', 'temp', 'var(--yellow)');
   renderSparkline('diskSparkline', 'disk', 'var(--purple)');
+}
+
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function markdownPreview(md, maxChars = 3500) {
+  const text = String(md || '').slice(0, maxChars);
+  return escapeHtml(text)
+    .replace(/^### (.+)$/gm, '<div style="font-size:14px;font-weight:700;color:var(--accent);margin:12px 0 6px;">$1</div>')
+    .replace(/^## (.+)$/gm, '<div style="font-size:16px;font-weight:700;color:var(--accent);margin:16px 0 8px;">$1</div>')
+    .replace(/^# (.+)$/gm, '<div style="font-size:18px;font-weight:700;color:var(--accent);margin:18px 0 10px;">$1</div>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--text-primary);font-weight:700;">$1</strong>')
+    .replace(/`([^`]+)`/g, '<code style="background:var(--bg-tertiary);padding:2px 6px;border-radius:4px;font-size:11px;">$1</code>')
+    .replace(/\n/g, '<br>');
+}
+
+async function fetchAiosData() {
+  try {
+    const res = await authFetch(API_BASE + '/api/aios');
+    aiosData = await res.json();
+    renderAiosPage();
+  } catch (e) {
+    console.error('AI-OS fetch error:', e);
+  }
+}
+
+function renderAiosPage() {
+  const stats = aiosData.stats || {};
+  const set = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+  set('aiosTotalRuns', stats.totalRuns || 0);
+  set('aiosRunningRuns', stats.running || 0);
+  set('aiosSuccessToday', stats.successToday || 0);
+  set('aiosFailuresToday', stats.failuresToday || 0);
+
+  const briefingEl = document.getElementById('aiosTodayBriefing');
+  if (briefingEl) {
+    const latest = (aiosData.briefings || [])[0];
+    if (!latest) {
+      briefingEl.innerHTML = '<div class="empty-state"><div class="empty-state-icon">🌅</div><div class="empty-state-text">Nog geen AI-OS briefing gevonden in status/aios</div></div>';
+    } else {
+      const created = latest.createdAt ? new Date(latest.createdAt).toLocaleString('nl-NL') : '--';
+      briefingEl.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:12px;">
+          <div>
+            <div style="font-weight:700;font-size:16px;margin-bottom:4px;">${escapeHtml(latest.title || latest.briefingId || 'Briefing')}</div>
+            <div style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${escapeHtml(latest.date || '')} · ${escapeHtml(created)} · ${escapeHtml(latest.status || '')}</div>
+          </div>
+          <span class="badge main">${escapeHtml(latest.type || 'briefing')}</span>
+        </div>
+        <div style="font-size:13px;line-height:1.65;color:var(--text-secondary);font-family:'Inter',sans-serif;">${markdownPreview(latest.contentMarkdown || latest.content || '')}</div>`;
+    }
+  }
+
+  const runsEl = document.getElementById('aiosRecentRuns');
+  if (runsEl) {
+    const runs = (aiosData.runs || []).slice(0, 30);
+    const colors = { running: 'var(--yellow)', success: 'var(--green)', failure: 'var(--red)', late: 'var(--orange)' };
+    const icons = { running: '🟡', success: '✅', failure: '❌', late: '⚠️' };
+    runsEl.innerHTML = runs.map(run => {
+      const status = run.status || 'unknown';
+      const ts = run.endedAt || run.startedAt || '';
+      const when = ts ? new Date(ts).toLocaleString('nl-NL') : '--';
+      const summary = run.summary || run.error || '';
+      const color = colors[status] || 'var(--text-muted)';
+      return `<div style="padding:12px 0;border-bottom:1px solid var(--border);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+          <span>${icons[status] || '⚪'}</span>
+          <span style="font-weight:700;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(run.workflowName || run.runId)}</span>
+          <span style="font-size:10px;color:${color};font-weight:700;text-transform:uppercase;">${escapeHtml(status)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-bottom:4px;">${escapeHtml(run.runId || '')} · ${escapeHtml(run.tool || '')} · ${escapeHtml(run.modelRoute || 'n/a')} · ${escapeHtml(when)}</div>
+        ${summary ? `<div style="font-size:12px;color:var(--text-secondary);line-height:1.45;">${escapeHtml(summary)}</div>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty-state"><div class="empty-state-icon">⚡</div><div class="empty-state-text">Nog geen AI-OS runs gevonden</div></div>';
+  }
 }
 
 async function fetchNewData() {

@@ -15,6 +15,9 @@ const dataDir = path.join(WORKSPACE_DIR, 'data');
 const memoryDir = path.join(WORKSPACE_DIR, 'memory');
 const memoryMdPath = path.join(WORKSPACE_DIR, 'MEMORY.md');
 const heartbeatPath = path.join(WORKSPACE_DIR, 'HEARTBEAT.md');
+const aiosDir = path.join(WORKSPACE_DIR, 'status', 'aios');
+const briefingBufferFile = path.join(WORKSPACE_DIR, 'status', 'briefing-buffer.jsonl');
+const activeTasksFile = path.join(WORKSPACE_DIR, 'status', 'active-tasks.json');
 const healthHistoryFile = path.join(dataDir, 'health-history.json');
 const AUTH_DATA_DIR = process.env.DASHBOARD_AUTH_DIR || dataDir;
 const auditLogPath = path.join(AUTH_DATA_DIR, 'audit.log');
@@ -1285,6 +1288,141 @@ function getMemoryFiles() {
   return files;
 }
 
+
+function safeReadJson(filePath, fallback) {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+function readJsonl(filePath, limit = 200) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const lines = fs.readFileSync(filePath, 'utf8').split('\n').filter(Boolean);
+    return lines.slice(-limit).map(line => {
+      try { return JSON.parse(line); } catch { return null; }
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function getAiosBriefings() {
+  const briefings = [];
+  try {
+    if (!fs.existsSync(aiosDir)) return [];
+    const files = fs.readdirSync(aiosDir)
+      .filter(f => /^briefing-.*\.json$/.test(f))
+      .sort()
+      .reverse()
+      .slice(0, 30);
+    for (const file of files) {
+      try {
+        const fullPath = path.join(aiosDir, file);
+        const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+        const briefing = data.briefing || data;
+        briefings.push({
+          ...briefing,
+          file,
+          modified: fs.statSync(fullPath).mtimeMs,
+          run: data.run || null
+        });
+      } catch {}
+    }
+  } catch {}
+  return briefings;
+}
+
+function getAiosRuns() {
+  const byId = new Map();
+  const put = (run) => {
+    if (!run || !run.runId) return;
+    const prev = byId.get(run.runId);
+    const prevTs = Date.parse(prev?.endedAt || prev?.startedAt || prev?.timestamp || 0) || 0;
+    const nextTs = Date.parse(run.endedAt || run.startedAt || run.timestamp || 0) || 0;
+    if (!prev || nextTs >= prevTs) byId.set(run.runId, run);
+  };
+
+  for (const item of getAiosBriefings()) {
+    if (item.run) put(item.run);
+  }
+
+  for (const entry of readJsonl(path.join(aiosDir, 'runs.jsonl'), 500)) {
+    put(entry);
+  }
+
+  for (const entry of readJsonl(briefingBufferFile, 500)) {
+    const taskId = entry.task_id || entry.taskId;
+    if (!taskId) continue;
+    const statusMap = { started: 'running', completed: 'success', failed: 'failure', 'review-failed': 'failure', 'verify-failed': 'failure', 'waiting-for-jasper': 'late' };
+    put({
+      runId: String(taskId).startsWith('task-') ? String(taskId) : `task-${taskId}`,
+      workflowName: entry.title || String(taskId),
+      tool: entry.tool || 'OpenClaw',
+      status: statusMap[entry.status] || entry.status || 'unknown',
+      startedAt: entry.timestamp,
+      endedAt: entry.status && entry.status !== 'started' ? entry.timestamp : undefined,
+      modelRoute: entry.model || undefined,
+      summary: entry.summary || undefined,
+      error: entry.status === 'failed' ? entry.summary : undefined,
+      metadata: {
+        taskId,
+        source: 'status/briefing-buffer.jsonl',
+        rawStatus: entry.status,
+        pr: entry.pr,
+        testUrl: entry.test_url,
+        jasperAction: entry.jasper_action,
+        durationMin: entry.duration_min
+      }
+    });
+  }
+
+  const activeTasks = safeReadJson(activeTasksFile, []);
+  if (Array.isArray(activeTasks)) {
+    for (const task of activeTasks) {
+      const taskId = task.task_id || task.taskId;
+      if (!taskId) continue;
+      put({
+        runId: String(taskId).startsWith('task-') ? String(taskId) : `task-${taskId}`,
+        workflowName: task.title || String(taskId),
+        tool: task.tool || 'OpenClaw',
+        status: 'running',
+        startedAt: task.started,
+        modelRoute: task.model,
+        summary: task.project ? `Project: ${task.project}` : undefined,
+        metadata: { ...task, source: 'status/active-tasks.json' }
+      });
+    }
+  }
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const bt = Date.parse(b.endedAt || b.startedAt || b.timestamp || 0) || 0;
+    const at = Date.parse(a.endedAt || a.startedAt || a.timestamp || 0) || 0;
+    return bt - at;
+  }).slice(0, 200);
+}
+
+function getAiosSummary() {
+  const runs = getAiosRuns();
+  const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const todayRuns = runs.filter(r => String(r.startedAt || r.endedAt || '').slice(0, 10) === today);
+  return {
+    generatedAt: new Date().toISOString(),
+    briefings: getAiosBriefings(),
+    runs,
+    stats: {
+      totalRuns: runs.length,
+      running: runs.filter(r => r.status === 'running').length,
+      successToday: todayRuns.filter(r => r.status === 'success').length,
+      failuresToday: todayRuns.filter(r => r.status === 'failure').length,
+      latestBriefingAt: getAiosBriefings()[0]?.createdAt || null
+    }
+  };
+}
+
 function getKeyFiles() {
   const files = [];
   for (const fname of workspaceFilenames) {
@@ -1964,6 +2102,21 @@ const server = http.createServer((req, res) => {
     if (req.url === '/api/memory') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(getMemoryFiles()));
+      return;
+    }
+    if (req.url === '/api/aios') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getAiosSummary()));
+      return;
+    }
+    if (req.url === '/api/aios/briefings') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getAiosBriefings()));
+      return;
+    }
+    if (req.url === '/api/aios/runs') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getAiosRuns()));
       return;
     }
     if (req.url === '/api/tokens-today') {
