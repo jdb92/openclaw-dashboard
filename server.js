@@ -1552,7 +1552,8 @@ function getAiosExecutiveSummary(actions, signals, infraFindings, runs) {
   const openActions = actions.filter(a => ['open', 'pending'].includes(String(a.status || 'open')));
   const highActions = openActions.filter(a => ['high', 'urgent'].includes(String(a.priority || '').toLowerCase()));
   const highFindings = infraFindings.filter(f => ['critical', 'high'].includes(String(f.severity || '').toLowerCase()) && String(f.status || 'draft') !== 'done');
-  const failedRuns = runs.filter(r => ['failure', 'late'].includes(String(r.status || '')));
+  const cutoffMs = Date.now() - 24 * 60 * 60 * 1000;
+  const failedRuns = runs.filter(r => ['failure', 'late'].includes(String(r.status || '')) && aiosItemTime(r) >= cutoffMs);
   const topSignals = signals.filter(s => String(s.status || 'new') === 'new' && (Number(s.score || 0) >= 8)).length;
   let posture = 'groen';
   if (failedRuns.length || highFindings.length || highActions.length) posture = 'oranje';
