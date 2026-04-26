@@ -1765,6 +1765,18 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
       <div class="card mb-24">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;">
           <div>
+            <h3 class="card-title" style="margin:0;">Command Summary</h3>
+            <p style="margin:4px 0 0;color:var(--text-muted);font-size:12px;">Prioriteit, risico's en eerstvolgende actie uit AI-OS data.</p>
+          </div>
+          <button onclick="fetchAiosData()" style="padding:4px 10px;background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;">↻ Refresh</button>
+        </div>
+        <div id="aiosExecutiveSummary" style="margin-bottom:14px;"></div>
+        <div id="aiosHighlights" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px;"></div>
+      </div>
+
+      <div class="card mb-24">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;">
+          <div>
             <h3 class="card-title" style="margin:0;">Actions & Approvals</h3>
             <p style="margin:4px 0 0;color:var(--text-muted);font-size:12px;">Open loops, Jasper approvals en concrete next actions.</p>
           </div>
@@ -4636,6 +4648,38 @@ function renderAiosPage() {
   set('aiosRunningRuns', stats.running || 0);
   set('aiosSuccessToday', stats.successToday || 0);
   set('aiosFailuresToday', stats.failuresToday || 0);
+
+  const summaryEl = document.getElementById('aiosExecutiveSummary');
+  if (summaryEl) {
+    const summary = aiosData.executiveSummary || {};
+    const posture = summary.posture || 'groen';
+    const postureColors = { groen: 'var(--green)', oranje: 'var(--yellow)', rood: 'var(--red)' };
+    summaryEl.innerHTML = `<div style="padding:14px;border:1px solid var(--border);border-left:4px solid ${postureColors[posture] || 'var(--accent)'};border-radius:10px;background:var(--bg-secondary);">
+      <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;">
+        <span style="font-size:18px;">${posture === 'rood' ? '🔴' : posture === 'oranje' ? '🟠' : '🟢'}</span>
+        <strong style="font-size:14px;color:var(--text-primary);">${escapeHtml(summary.text || 'Geen AI-OS samenvatting beschikbaar')}</strong>
+      </div>
+      <div style="font-size:12px;color:var(--text-secondary);">Aanbevolen volgende actie: <strong>${escapeHtml(summary.nextRecommendedAction || 'Geen directe actie')}</strong></div>
+    </div>`;
+  }
+
+  const highlightsEl = document.getElementById('aiosHighlights');
+  if (highlightsEl) {
+    const kindIcons = { action: '⚡', finding: '🛡️', signal: '📡', run: '🏃' };
+    const highlights = (aiosData.highlights || []).slice(0, 8);
+    highlightsEl.innerHTML = highlights.map(item => {
+      const meta = [item.kind, item.source, item.priority || item.severity || item.status].filter(Boolean).join(' · ');
+      return `<div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);min-height:112px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <span>${kindIcons[item.kind] || '•'}</span>
+          <div style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;text-transform:uppercase;">${escapeHtml(meta)}</div>
+          <div style="margin-left:auto;font-size:10px;color:var(--accent);font-weight:700;">${escapeHtml(String(item.score || 0))}</div>
+        </div>
+        <div style="font-weight:700;font-size:13px;line-height:1.35;margin-bottom:6px;color:var(--text-primary);">${escapeHtml(item.title || 'AI-OS highlight')}</div>
+        ${item.summary ? `<div style="font-size:12px;color:var(--text-secondary);line-height:1.45;">${escapeHtml(item.summary).slice(0, 260)}</div>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-text">Geen urgente AI-OS highlights</div></div>';
+  }
 
   const actionsEl = document.getElementById('aiosActions');
   if (actionsEl) {

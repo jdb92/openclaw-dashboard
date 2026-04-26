@@ -1460,6 +1460,111 @@ function getAiosRawItems() { return getAiosJsonl(aiosRawItemsFile, 'itemId', 300
 function getAiosSignals() { return getAiosJsonl(aiosSignalsFile, 'signalId', 300); }
 function getAiosInfraFindings() { return getAiosJsonl(aiosInfraFindingsFile, 'findingId', 300); }
 
+
+function aiosItemTime(item) {
+  return Date.parse(item.updatedAt || item.createdAt || item.timestamp || item.startedAt || item.endedAt || 0) || 0;
+}
+
+function aiosSeverityScore(item) {
+  const sev = String(item.severity || '').toLowerCase();
+  const pri = String(item.priority || '').toLowerCase();
+  const status = String(item.status || '').toLowerCase();
+  let score = Number(item.score || 0) || 0;
+  if (sev === 'critical') score += 12;
+  else if (sev === 'high') score += 9;
+  else if (sev === 'medium') score += 5;
+  else if (sev === 'low') score += 2;
+  if (pri === 'urgent' || pri === 'high') score += 5;
+  else if (pri === 'normal') score += 2;
+  if (status === 'open' || status === 'pending' || status === 'draft' || status === 'new') score += 3;
+  return score;
+}
+
+function getAiosHighlights(actions, signals, infraFindings, runs) {
+  const highlights = [];
+  const seenTitles = new Set();
+  const addHighlight = (item) => {
+    const key = `${item.kind}:${String(item.title || '').toLowerCase().replace(/\s+/g, ' ').trim()}`;
+    if (seenTitles.has(key)) return;
+    seenTitles.add(key);
+    highlights.push(item);
+  };
+  for (const action of actions.filter(a => ['open', 'pending'].includes(String(a.status || 'open'))).slice(0, 20)) {
+    addHighlight({
+      kind: 'action',
+      title: action.title || action.actionId,
+      summary: action.description || '',
+      priority: action.priority || 'normal',
+      status: action.status || 'open',
+      source: action.source || 'ai-os',
+      createdAt: action.updatedAt || action.createdAt,
+      score: aiosSeverityScore(action),
+      actionId: action.actionId
+    });
+  }
+  for (const finding of infraFindings.filter(f => String(f.status || 'draft') !== 'done').slice(0, 20)) {
+    addHighlight({
+      kind: 'finding',
+      title: finding.title || finding.findingId,
+      summary: finding.recommendedAction || finding.summary || '',
+      severity: finding.severity || 'medium',
+      status: finding.status || 'draft',
+      source: finding.source || 'infra',
+      url: finding.url,
+      createdAt: finding.updatedAt || finding.createdAt,
+      score: aiosSeverityScore(finding),
+      findingId: finding.findingId
+    });
+  }
+  for (const signal of signals.filter(s => String(s.status || 'new') === 'new').slice(0, 30)) {
+    addHighlight({
+      kind: 'signal',
+      title: signal.title || signal.signalId,
+      summary: signal.summary || '',
+      status: signal.status || 'new',
+      source: signal.source || 'signal',
+      url: signal.url,
+      createdAt: signal.updatedAt || signal.createdAt,
+      score: aiosSeverityScore(signal),
+      signalId: signal.signalId
+    });
+  }
+  for (const run of runs.filter(r => ['failure', 'late'].includes(String(r.status || ''))).slice(0, 10)) {
+    addHighlight({
+      kind: 'run',
+      title: run.workflowName || run.runId,
+      summary: run.error || run.summary || '',
+      status: run.status,
+      source: run.tool || 'run',
+      createdAt: run.endedAt || run.startedAt,
+      score: run.status === 'failure' ? 12 : 8,
+      runId: run.runId
+    });
+  }
+  return highlights.sort((a, b) => {
+    const scoreDiff = (b.score || 0) - (a.score || 0);
+    if (scoreDiff) return scoreDiff;
+    return aiosItemTime(b) - aiosItemTime(a);
+  }).slice(0, 8);
+}
+
+function getAiosExecutiveSummary(actions, signals, infraFindings, runs) {
+  const openActions = actions.filter(a => ['open', 'pending'].includes(String(a.status || 'open')));
+  const highActions = openActions.filter(a => ['high', 'urgent'].includes(String(a.priority || '').toLowerCase()));
+  const highFindings = infraFindings.filter(f => ['critical', 'high'].includes(String(f.severity || '').toLowerCase()) && String(f.status || 'draft') !== 'done');
+  const failedRuns = runs.filter(r => ['failure', 'late'].includes(String(r.status || '')));
+  const topSignals = signals.filter(s => String(s.status || 'new') === 'new' && (Number(s.score || 0) >= 8)).length;
+  let posture = 'groen';
+  if (failedRuns.length || highFindings.length || highActions.length) posture = 'oranje';
+  if (failedRuns.length >= 2 || highActions.length >= 2) posture = 'rood';
+  const next = highActions[0]?.title || highFindings[0]?.title || (topSignals ? 'Review high-score signalen' : 'Geen directe actie nodig');
+  return {
+    posture,
+    text: `${posture.toUpperCase()}: ${openActions.length} open actions, ${highFindings.length} high findings, ${topSignals} high-score signals, ${failedRuns.length} failed/late runs.`,
+    nextRecommendedAction: next
+  };
+}
+
 function getAiosSummary() {
   const runs = getAiosRuns();
   const actions = getAiosActions();
@@ -1468,6 +1573,8 @@ function getAiosSummary() {
   const infraFindings = getAiosInfraFindings();
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const todayRuns = runs.filter(r => String(r.startedAt || r.endedAt || '').slice(0, 10) === today);
+  const highlights = getAiosHighlights(actions, signals, infraFindings, runs);
+  const executiveSummary = getAiosExecutiveSummary(actions, signals, infraFindings, runs);
   return {
     generatedAt: new Date().toISOString(),
     briefings: getAiosBriefings(),
@@ -1476,6 +1583,8 @@ function getAiosSummary() {
     rawItems,
     signals,
     infraFindings,
+    highlights,
+    executiveSummary,
     stats: {
       totalRuns: runs.length,
       running: runs.filter(r => r.status === 'running').length,
