@@ -24,6 +24,8 @@ const aiosSignalsFile = path.join(aiosDir, 'signals.jsonl');
 const aiosInfraFindingsFile = path.join(aiosDir, 'infra-findings.jsonl');
 const healthHistoryFile = path.join(dataDir, 'health-history.json');
 const AUTH_DATA_DIR = process.env.DASHBOARD_AUTH_DIR || dataDir;
+const AUTH_DISABLED = process.env.DASHBOARD_AUTH_DISABLED === 'true' || process.env.DASHBOARD_TRUST_CLOUDFLARE_ACCESS === 'true';
+const AUTH_BYPASS_TOKEN = 'cloudflare-access';
 const auditLogPath = path.join(AUTH_DATA_DIR, 'audit.log');
 const credentialsFile = path.join(AUTH_DATA_DIR, 'credentials.json');
 const mfaSecretFile = path.join(AUTH_DATA_DIR, 'mfa-secret.txt');
@@ -373,6 +375,7 @@ function httpsEnforcement(req, res) {
 }
 
 function isAuthenticated(req) {
+  if (AUTH_DISABLED) return true;
   const authHeader = req.headers.authorization;
   let token = null;
   if (authHeader && authHeader.startsWith('Bearer ')) {
@@ -404,6 +407,7 @@ function isAuthenticated(req) {
 }
 
 function requireAuth(req, res) {
+  if (AUTH_DISABLED) return true;
   const ip = getClientIP(req);
   const limitCheck = checkRateLimit(ip);
   if (limitCheck.blocked) {
@@ -1698,6 +1702,12 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.url === '/api/auth/status') {
+    if (AUTH_DISABLED) {
+      setSameSiteCORS(req, res);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ registered: true, loggedIn: true, authDisabled: true, sessionToken: AUTH_BYPASS_TOKEN }));
+      return;
+    }
     const creds = getCredentials();
     const registered = !!creds;
     const loggedIn = isAuthenticated(req);

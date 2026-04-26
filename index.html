@@ -2340,8 +2340,10 @@ const TOKEN_KEY = 'dashboardToken';
 const TOKEN_EXPIRY_KEY = 'dashboardTokenExpiry';
 const TOKEN_LIFETIME = 24 * 60 * 60 * 1000;
 const REMEMBER_ME_LIFETIME = 3 * 60 * 60 * 1000;
+let authDisabled = false;
 
 function getStoredToken() {
+  if (authDisabled) return 'cloudflare-access';
   let token = sessionStorage.getItem(TOKEN_KEY);
   let expiry = sessionStorage.getItem(TOKEN_EXPIRY_KEY);
   
@@ -2375,6 +2377,7 @@ function setStoredToken(token, rememberMe = false) {
 }
 
 function clearStoredToken() {
+  if (authDisabled) return;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(TOKEN_EXPIRY_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
@@ -2701,6 +2704,10 @@ async function handleChangePassword(event) {
 }
 
 async function handleLogout() {
+  if (authDisabled) {
+    showToast('Dashboard login is disabled; use Cloudflare Access to sign out.', 'info');
+    return;
+  }
   if (!confirm('Are you sure you want to logout?')) return;
   
   try {
@@ -2744,6 +2751,12 @@ async function checkAuth() {
   try {
     const statusRes = await fetch(API_BASE + '/api/auth/status');
     const statusData = await statusRes.json();
+    if (statusData.authDisabled) {
+      authDisabled = true;
+      if (statusData.sessionToken) setStoredToken(statusData.sessionToken, false);
+      showApp();
+      return;
+    }
     
     const token = getStoredToken();
     
