@@ -18,6 +18,7 @@ const heartbeatPath = path.join(WORKSPACE_DIR, 'HEARTBEAT.md');
 const aiosDir = path.join(WORKSPACE_DIR, 'status', 'aios');
 const briefingBufferFile = path.join(WORKSPACE_DIR, 'status', 'briefing-buffer.jsonl');
 const activeTasksFile = path.join(WORKSPACE_DIR, 'status', 'active-tasks.json');
+const aiosActionsFile = path.join(aiosDir, 'actions.jsonl');
 const healthHistoryFile = path.join(dataDir, 'health-history.json');
 const AUTH_DATA_DIR = process.env.DASHBOARD_AUTH_DIR || dataDir;
 const auditLogPath = path.join(AUTH_DATA_DIR, 'audit.log');
@@ -1405,19 +1406,47 @@ function getAiosRuns() {
   }).slice(0, 200);
 }
 
+function getAiosActions() {
+  const byId = new Map();
+  for (const entry of readJsonl(aiosActionsFile, 1000)) {
+    if (!entry || !entry.actionId) continue;
+    const prev = byId.get(entry.actionId);
+    const prevTs = Date.parse(prev?.updatedAt || prev?.createdAt || 0) || 0;
+    const nextTs = Date.parse(entry.updatedAt || entry.createdAt || 0) || 0;
+    if (!prev || nextTs >= prevTs) byId.set(entry.actionId, entry);
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const statusWeight = { open: 0, pending: 1, done: 2, dismissed: 3 };
+    const aw = statusWeight[a.status] ?? 1;
+    const bw = statusWeight[b.status] ?? 1;
+    if (aw !== bw) return aw - bw;
+    const bt = Date.parse(b.updatedAt || b.createdAt || 0) || 0;
+    const at = Date.parse(a.updatedAt || a.createdAt || 0) || 0;
+    return bt - at;
+  }).slice(0, 200);
+}
+
+function appendAiosAction(action) {
+  fs.mkdirSync(aiosDir, { recursive: true });
+  fs.appendFileSync(aiosActionsFile, JSON.stringify(action) + '\n', 'utf8');
+}
+
 function getAiosSummary() {
   const runs = getAiosRuns();
+  const actions = getAiosActions();
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const todayRuns = runs.filter(r => String(r.startedAt || r.endedAt || '').slice(0, 10) === today);
   return {
     generatedAt: new Date().toISOString(),
     briefings: getAiosBriefings(),
     runs,
+    actions,
     stats: {
       totalRuns: runs.length,
       running: runs.filter(r => r.status === 'running').length,
       successToday: todayRuns.filter(r => r.status === 'success').length,
       failuresToday: todayRuns.filter(r => r.status === 'failure').length,
+      openActions: actions.filter(a => a.status === 'open' || a.status === 'pending').length,
       latestBriefingAt: getAiosBriefings()[0]?.createdAt || null
     }
   };
@@ -2118,6 +2147,51 @@ const server = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(getAiosRuns()));
       return;
+    }
+    if (req.url === '/api/aios/actions') {
+      if (req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(getAiosActions()));
+        return;
+      }
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk; if (body.length > 8192) req.destroy(); });
+        req.on('end', () => {
+          try {
+            const input = JSON.parse(body || '{}');
+            const now = new Date().toISOString();
+            const actionId = String(input.actionId || `action-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`);
+            const existing = getAiosActions().find(a => a.actionId === actionId) || {};
+            const action = {
+              ...existing,
+              actionId,
+              title: String(input.title || existing.title || '').slice(0, 160),
+              description: String(input.description || existing.description || '').slice(0, 2000),
+              type: String(input.type || existing.type || 'task').slice(0, 40),
+              status: String(input.status || existing.status || 'open').slice(0, 40),
+              priority: String(input.priority || existing.priority || 'normal').slice(0, 20),
+              owner: String(input.owner || existing.owner || 'Max').slice(0, 80),
+              source: String(input.source || existing.source || 'dashboard').slice(0, 120),
+              dueAt: input.dueAt || existing.dueAt || null,
+              createdAt: existing.createdAt || now,
+              updatedAt: now
+            };
+            if (!action.title) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'title required' }));
+              return;
+            }
+            appendAiosAction(action);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: true, action }));
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Bad request' }));
+          }
+        });
+        return;
+      }
     }
     if (req.url === '/api/tokens-today') {
       res.writeHead(200, { 'Content-Type': 'application/json' });

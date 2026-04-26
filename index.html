@@ -1762,6 +1762,17 @@ body.light-theme ::selection { background: rgba(99,102,241,0.2); }
         <div class="card"><div class="metric"><div class="metric-value" id="aiosFailuresToday">0</div><div class="metric-label">Failures Today</div></div></div>
       </div>
 
+      <div class="card mb-24">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;">
+          <div>
+            <h3 class="card-title" style="margin:0;">Actions & Approvals</h3>
+            <p style="margin:4px 0 0;color:var(--text-muted);font-size:12px;">Open loops, Jasper approvals en concrete next actions.</p>
+          </div>
+          <button onclick="showCreateAiosAction()" style="padding:6px 12px;background:var(--accent);color:white;border:0;border-radius:6px;font-size:12px;cursor:pointer;">+ Action</button>
+        </div>
+        <div id="aiosActions" style="display:flex;flex-direction:column;gap:10px;"></div>
+      </div>
+
       <div class="grid grid-2 mb-24" style="align-items:start;">
         <div class="card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:12px;">
@@ -4613,6 +4624,29 @@ function renderAiosPage() {
   set('aiosSuccessToday', stats.successToday || 0);
   set('aiosFailuresToday', stats.failuresToday || 0);
 
+  const actionsEl = document.getElementById('aiosActions');
+  if (actionsEl) {
+    const actions = (aiosData.actions || []).slice(0, 12);
+    const colors = { open: 'var(--yellow)', pending: 'var(--orange)', done: 'var(--green)', dismissed: 'var(--text-muted)' };
+    const typeIcons = { approval: '✋', decision: '🧭', task: '⚡', followup: '🔁', risk: '⚠️' };
+    actionsEl.innerHTML = actions.map(action => {
+      const status = action.status || 'open';
+      const updated = action.updatedAt ? new Date(action.updatedAt).toLocaleString('nl-NL') : '--';
+      return `<div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);display:flex;gap:12px;align-items:flex-start;">
+        <div style="font-size:18px;line-height:1;">${typeIcons[action.type] || '⚡'}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;">
+            <div style="font-weight:700;font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(action.title || action.actionId)}</div>
+            <span style="font-size:10px;color:${colors[status] || 'var(--text-muted)'};font-weight:700;text-transform:uppercase;">${escapeHtml(status)}</span>
+          </div>
+          ${action.description ? `<div style="font-size:12px;color:var(--text-secondary);line-height:1.45;margin-bottom:6px;">${escapeHtml(action.description)}</div>` : ''}
+          <div style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;">${escapeHtml(action.priority || 'normal')} · ${escapeHtml(action.owner || 'Max')} · ${escapeHtml(updated)}</div>
+        </div>
+        ${status !== 'done' ? `<button onclick="updateAiosAction('${escapeHtml(action.actionId)}','done')" style="padding:4px 8px;border:1px solid var(--border);background:var(--bg-tertiary);color:var(--text-secondary);border-radius:6px;font-size:11px;cursor:pointer;">Done</button>` : ''}
+      </div>`;
+    }).join('') || '<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-text">Geen open AI-OS actions</div></div>';
+  }
+
   const briefingEl = document.getElementById('aiosTodayBriefing');
   if (briefingEl) {
     const latest = (aiosData.briefings || [])[0];
@@ -4654,6 +4688,29 @@ function renderAiosPage() {
       </div>`;
     }).join('') || '<div class="empty-state"><div class="empty-state-icon">⚡</div><div class="empty-state-text">Nog geen AI-OS runs gevonden</div></div>';
   }
+}
+
+async function showCreateAiosAction() {
+  const title = prompt('Nieuwe AI-OS action titel');
+  if (!title) return;
+  const description = prompt('Korte context / gewenste uitkomst') || '';
+  await createAiosAction({ title, description, type: 'task', status: 'open', priority: 'normal', source: 'dashboard' });
+}
+
+async function createAiosAction(action) {
+  const res = await authFetch(API_BASE + '/api/aios/actions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action)
+  });
+  if (!res.ok) throw new Error('Action opslaan mislukt');
+  await fetchAiosData();
+}
+
+async function updateAiosAction(actionId, status) {
+  const action = (aiosData.actions || []).find(a => a.actionId === actionId);
+  if (!action) return;
+  await createAiosAction({ ...action, status });
 }
 
 async function fetchNewData() {
