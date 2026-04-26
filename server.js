@@ -19,6 +19,9 @@ const aiosDir = path.join(WORKSPACE_DIR, 'status', 'aios');
 const briefingBufferFile = path.join(WORKSPACE_DIR, 'status', 'briefing-buffer.jsonl');
 const activeTasksFile = path.join(WORKSPACE_DIR, 'status', 'active-tasks.json');
 const aiosActionsFile = path.join(aiosDir, 'actions.jsonl');
+const aiosRawItemsFile = path.join(aiosDir, 'raw-items.jsonl');
+const aiosSignalsFile = path.join(aiosDir, 'signals.jsonl');
+const aiosInfraFindingsFile = path.join(aiosDir, 'infra-findings.jsonl');
 const healthHistoryFile = path.join(dataDir, 'health-history.json');
 const AUTH_DATA_DIR = process.env.DASHBOARD_AUTH_DIR || dataDir;
 const auditLogPath = path.join(AUTH_DATA_DIR, 'audit.log');
@@ -1431,9 +1434,34 @@ function appendAiosAction(action) {
   fs.appendFileSync(aiosActionsFile, JSON.stringify(action) + '\n', 'utf8');
 }
 
+function getAiosJsonl(filePath, idField, limit = 200) {
+  const byId = new Map();
+  for (const entry of readJsonl(filePath, 2000)) {
+    if (!entry) continue;
+    const id = entry[idField] || entry.id || entry.url || entry.link || entry.title;
+    if (!id) continue;
+    const prev = byId.get(id);
+    const prevTs = Date.parse(prev?.updatedAt || prev?.createdAt || prev?.timestamp || 0) || 0;
+    const nextTs = Date.parse(entry.updatedAt || entry.createdAt || entry.timestamp || 0) || 0;
+    if (!prev || nextTs >= prevTs) byId.set(id, { ...entry, [idField]: String(id) });
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const bt = Date.parse(b.updatedAt || b.createdAt || b.timestamp || 0) || 0;
+    const at = Date.parse(a.updatedAt || a.createdAt || a.timestamp || 0) || 0;
+    return bt - at;
+  }).slice(0, limit);
+}
+
+function getAiosRawItems() { return getAiosJsonl(aiosRawItemsFile, 'itemId', 300); }
+function getAiosSignals() { return getAiosJsonl(aiosSignalsFile, 'signalId', 300); }
+function getAiosInfraFindings() { return getAiosJsonl(aiosInfraFindingsFile, 'findingId', 300); }
+
 function getAiosSummary() {
   const runs = getAiosRuns();
   const actions = getAiosActions();
+  const rawItems = getAiosRawItems();
+  const signals = getAiosSignals();
+  const infraFindings = getAiosInfraFindings();
   const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Amsterdam', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   const todayRuns = runs.filter(r => String(r.startedAt || r.endedAt || '').slice(0, 10) === today);
   return {
@@ -1441,12 +1469,18 @@ function getAiosSummary() {
     briefings: getAiosBriefings(),
     runs,
     actions,
+    rawItems,
+    signals,
+    infraFindings,
     stats: {
       totalRuns: runs.length,
       running: runs.filter(r => r.status === 'running').length,
       successToday: todayRuns.filter(r => r.status === 'success').length,
       failuresToday: todayRuns.filter(r => r.status === 'failure').length,
       openActions: actions.filter(a => a.status === 'open' || a.status === 'pending').length,
+      rawItems: rawItems.length,
+      signals: signals.length,
+      infraFindings: infraFindings.length,
       latestBriefingAt: getAiosBriefings()[0]?.createdAt || null
     }
   };
@@ -2146,6 +2180,21 @@ const server = http.createServer((req, res) => {
     if (req.url === '/api/aios/runs') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(getAiosRuns()));
+      return;
+    }
+    if (req.url === '/api/aios/raw-items') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getAiosRawItems()));
+      return;
+    }
+    if (req.url === '/api/aios/signals') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getAiosSignals()));
+      return;
+    }
+    if (req.url === '/api/aios/infra-findings') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(getAiosInfraFindings()));
       return;
     }
     if (req.url === '/api/aios/actions') {
