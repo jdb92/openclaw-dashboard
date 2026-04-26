@@ -4631,6 +4631,43 @@ function markdownPreview(md, maxChars = 3500) {
     .replace(/\n/g, '<br>');
 }
 
+function aiosHighlightTarget(item) {
+  if (!item) return null;
+  if (item.kind === 'action' && item.actionId) return { section: 'actions', id: item.actionId };
+  if (item.kind === 'run' && item.runId) return { section: 'runs', id: item.runId };
+  if (item.kind === 'finding' && item.findingId) return { section: 'briefing', id: item.findingId };
+  if (item.kind === 'signal' && item.signalId) return { section: 'briefing', id: item.signalId };
+  return { section: 'briefing', id: item.title || '' };
+}
+
+function scrollToAiosSection(section, id = '') {
+  const targets = {
+    actions: 'aiosActions',
+    runs: 'aiosRecentRuns',
+    briefing: 'aiosTodayBriefing',
+    summary: 'aiosExecutiveSummary'
+  };
+  const el = document.getElementById(targets[section] || section);
+  if (!el) return;
+  const oldBoxShadow = el.style.boxShadow;
+  const oldRadius = el.style.borderRadius;
+  el.style.setProperty('box-shadow', '0 0 0 3px var(--accent)', 'important');
+  el.style.borderRadius = oldRadius || '10px';
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  setTimeout(() => {
+    el.style.boxShadow = oldBoxShadow;
+    el.style.borderRadius = oldRadius;
+  }, 1400);
+}
+
+function openAiosHighlight(index) {
+  const item = (aiosData.highlights || [])[index];
+  const target = aiosHighlightTarget(item);
+  if (!target) return;
+  scrollToAiosSection(target.section, target.id);
+}
+
+
 async function fetchAiosData() {
   try {
     const res = await authFetch(API_BASE + '/api/aios');
@@ -4667,9 +4704,11 @@ function renderAiosPage() {
   if (highlightsEl) {
     const kindIcons = { action: '⚡', finding: '🛡️', signal: '📡', run: '🏃' };
     const highlights = (aiosData.highlights || []).slice(0, 8);
-    highlightsEl.innerHTML = highlights.map(item => {
+    highlightsEl.innerHTML = highlights.map((item, index) => {
       const meta = [item.kind, item.source, item.priority || item.severity || item.status].filter(Boolean).join(' · ');
-      return `<div style="padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);min-height:112px;">
+      const target = aiosHighlightTarget(item);
+      const targetLabel = target?.section === 'actions' ? 'Open action' : target?.section === 'runs' ? 'Open run' : 'Open context';
+      return `<button type="button" onclick="openAiosHighlight(${index})" style="text-align:left;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-secondary);min-height:112px;cursor:pointer;color:inherit;transition:all .15s ease;" onmouseover="this.style.borderColor='var(--accent)';this.style.transform='translateY(-1px)'" onmouseout="this.style.borderColor='var(--border)';this.style.transform='none'" title="${escapeHtml(targetLabel)}">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
           <span>${kindIcons[item.kind] || '•'}</span>
           <div style="font-size:10px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;text-transform:uppercase;">${escapeHtml(meta)}</div>
@@ -4677,7 +4716,8 @@ function renderAiosPage() {
         </div>
         <div style="font-weight:700;font-size:13px;line-height:1.35;margin-bottom:6px;color:var(--text-primary);">${escapeHtml(item.title || 'AI-OS highlight')}</div>
         ${item.summary ? `<div style="font-size:12px;color:var(--text-secondary);line-height:1.45;">${escapeHtml(item.summary).slice(0, 260)}</div>` : ''}
-      </div>`;
+        <div style="margin-top:8px;font-size:10px;color:var(--accent);font-weight:700;">${escapeHtml(targetLabel)} →</div>
+      </button>`;
     }).join('') || '<div class="empty-state"><div class="empty-state-icon">✅</div><div class="empty-state-text">Geen urgente AI-OS highlights</div></div>';
   }
 

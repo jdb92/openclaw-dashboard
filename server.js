@@ -1498,7 +1498,7 @@ function getAiosHighlights(actions, signals, infraFindings, runs) {
       status: action.status || 'open',
       source: action.source || 'ai-os',
       createdAt: action.updatedAt || action.createdAt,
-      score: aiosSeverityScore(action),
+      score: aiosSeverityScore(action) + 8,
       actionId: action.actionId
     });
   }
